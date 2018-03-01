@@ -8,10 +8,16 @@ import (
 	"gopkg.in/ldap.v2"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
 var (
+	up = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "openldap_up",
+			Help: "Value whether a connection to OpenLDAP has been successful",
+		})
 	syncCookie = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "openldap_contextCSN",
@@ -26,40 +32,57 @@ var (
 		})
 )
 
+func ymdToUnix(contextCSN string) (timestamp int64, label string) {
+	// This is a totally crude approach to set a well known base time to parse another date later
+	format := "20060102150405"
+	ymd := strings.Split(contextCSN, ".")[0]
+	time, _ := time.Parse(format, ymd)
+	label = strings.Split(contextCSN, "#")[2]
+	return time.Unix(), label
+}
+
 // Actually collect values from ldap
-func ldapWorker(ldapHost, baseDN string) {
+func csnWorker(ldapHost, baseDN string) {
 	conf := &tls.Config{
 		InsecureSkipVerify: true,
 	}
+
 	l, err := ldap.DialTLS("tcp", ldapHost, conf)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer l.Close()
 
-	searchRequest := ldap.NewSearchRequest(
-		baseDN, // The base dn to search
-		ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
-		"(objectClass=*)",      // The filter to apply
-		[]string{"contextCSN"}, // A list attributes to retrieve
-		nil,
-	)
-
-	sr, err := l.Search(searchRequest)
 	if err != nil {
-		log.Fatal(err)
-	}
-	for _, entry := range sr.Entries {
-		// log.Printf(entry.contextCSN)
-		for _, csn := range entry.GetAttributeValues("contextCSN") {
-			log.Printf(csn)
+		up.Set(float64(0))
+		log.Println(err)
+	} else {
+		defer l.Close()
+
+		searchRequest := ldap.NewSearchRequest(
+			baseDN, // The base dn to search
+			ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
+			"(objectClass=*)",      // The filter to apply
+			[]string{"contextCSN"}, // A list attributes to retrieve
+			nil,
+		)
+
+		sr, err := l.Search(searchRequest)
+		if err != nil {
+			up.Set(float64(0))
+			log.Println(err)
+		} else {
+			up.Set(float64(1))
+			for _, entry := range sr.Entries {
+				for _, csn := range entry.GetAttributeValues("contextCSN") {
+					epoch, label := ymdToUnix(csn)
+					syncCookie.WithLabelValues(label).Set(float64(epoch))
+				}
+			}
 		}
-		// log.Printf("%v\n", entry.GetAttributeValue("contextCSN"))
 	}
+}
+
+func ldapWorker(ldapHost, baseDN string) {
 	for {
+		csnWorker(ldapHost, baseDN)
 		numEntries.Inc()
-		syncCookie.WithLabelValues("001").Set(123456)
-		syncCookie.WithLabelValues("002").Set(987654321)
 		time.Sleep(60 * time.Second)
 	}
 }
