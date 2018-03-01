@@ -13,11 +13,12 @@ import (
 )
 
 var (
-	up = prometheus.NewGauge(
+	openldapUp = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "openldap_up",
 			Help: "Value whether a connection to OpenLDAP has been successful",
 		})
+
 	syncCookie = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "openldap_contextCSN",
@@ -25,6 +26,7 @@ var (
 		},
 		[]string{"index"},
 	)
+
 	numEntries = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "openldap_entries_num",
@@ -50,7 +52,7 @@ func csnWorker(ldapHost, baseDN string) {
 	l, err := ldap.DialTLS("tcp", ldapHost, conf)
 
 	if err != nil {
-		up.Set(float64(0))
+		openldapUp.Set(0)
 		log.Println(err)
 	} else {
 		defer l.Close()
@@ -65,10 +67,10 @@ func csnWorker(ldapHost, baseDN string) {
 
 		sr, err := l.Search(searchRequest)
 		if err != nil {
-			up.Set(float64(0))
+			openldapUp.Set(0)
 			log.Println(err)
 		} else {
-			up.Set(float64(1))
+			openldapUp.Set(1)
 			for _, entry := range sr.Entries {
 				for _, csn := range entry.GetAttributeValues("contextCSN") {
 					epoch, label := ymdToUnix(csn)
@@ -76,13 +78,29 @@ func csnWorker(ldapHost, baseDN string) {
 				}
 			}
 		}
+		searchRequest = ldap.NewSearchRequest(
+			baseDN, // The base dn to search
+			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+			"(objectClass=*)", // The filter to apply
+			[]string{"dn"},    // A list attributes to retrieve
+			nil,
+		)
+
+		sr, err = l.Search(searchRequest)
+		if err != nil {
+			openldapUp.Set(0)
+			log.Println(err)
+		} else {
+			openldapUp.Set(1)
+			numEntries.Set(float64(len(sr.Entries)))
+		}
+
 	}
 }
 
 func ldapWorker(ldapHost, baseDN string) {
 	for {
 		csnWorker(ldapHost, baseDN)
-		numEntries.Inc()
 		time.Sleep(60 * time.Second)
 	}
 }
@@ -98,7 +116,7 @@ func main() {
 		addr        = flag.String("telemetry.addr", ":9129", "host:port for ceph exporter")
 		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
 		ldapHost    = flag.String("ldap.host", "localhost:12345", "hostname:port of the ldap server")
-		baseDN      = flag.String("base.dn", "dc=selfnet,dc=de", "'dc=selfnet,dc=de' the base DN of the directory")
+		baseDN      = flag.String("base.dn", "dc=selfnet,dc=de", "'dc=example,dc=org' the base DN of the directory")
 	)
 	flag.Parse()
 	log.Printf(*addr, *metricsPath, *baseDN, *ldapHost)
