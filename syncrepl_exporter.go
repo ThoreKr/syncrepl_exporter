@@ -113,10 +113,10 @@ func init() {
 
 func main() {
 	var (
-		addr        = flag.String("telemetry.addr", ":9129", "host:port for ceph exporter")
+		addr        = flag.String("telemetry.addr", ":9328", "host:port for syncrepl exporter")
 		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
-		ldapHost    = flag.String("ldap.host", "localhost:12345", "hostname:port of the ldap server")
-		baseDN      = flag.String("base.dn", "dc=selfnet,dc=de", "'dc=example,dc=org' the base DN of the directory")
+		ldapHost    = flag.String("ldap.host", "localhost:636", "hostname:port of the ldap server")
+		baseDN      = flag.String("base.dn", "", "'dc=example,dc=org' the base DN of the directory")
 	)
 	flag.Parse()
 	log.Printf(*addr, *metricsPath, *baseDN, *ldapHost)
