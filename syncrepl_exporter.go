@@ -109,6 +109,7 @@ func init() {
 	// Register metrics
 	prometheus.MustRegister(syncCookie)
 	prometheus.MustRegister(numEntries)
+	prometheus.MustRegister(openldapUp)
 }
 
 func main() {
