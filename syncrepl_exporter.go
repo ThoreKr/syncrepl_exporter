@@ -3,13 +3,15 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"gopkg.in/ldap.v2"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jinzhu/configor"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"gopkg.in/ldap.v2"
 )
 
 var (
@@ -34,6 +36,18 @@ var (
 		})
 )
 
+var Config = struct {
+	Ldap struct {
+		Host     string `default:"localhost"`
+		Port     string `default:"636"`
+		Basedn   string `default:"dc=example,dc=org"`
+		StartTLS bool   `default:"false"`
+		Bind     bool   `default:"false"`
+		Bindcn   string `default:""`
+		Bindpass string `default:""`
+	}
+}{}
+
 func ymdToUnix(contextCSN string) (timestamp int64, label string) {
 	// This is a totally crude approach to set a well known base time to parse another date later
 	format := "20060102150405"
@@ -44,21 +58,41 @@ func ymdToUnix(contextCSN string) (timestamp int64, label string) {
 }
 
 // Actually collect values from ldap
-func csnWorker(ldapHost, baseDN string) {
+func csnWorker() {
 	conf := &tls.Config{
 		InsecureSkipVerify: true,
 	}
 
-	l, err := ldap.DialTLS("tcp", ldapHost, conf)
+	var l *ldap.Conn
+	var err error
+
+	if Config.Ldap.StartTLS {
+		// Connect to host
+		l, err = ldap.Dial("tcp", Config.Ldap.Host + ":" + Config.Ldap.Port)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer l.Close()
+
+		// Reconnect with TLS
+		err = l.StartTLS(conf)
+	} else {
+		l, err = ldap.DialTLS("tcp", Config.Ldap.Host + ":" + Config.Ldap.Port, conf)
+	}
+
+	// Bind
+	if Config.Ldap.Bind {
+		err = l.Bind(Config.Ldap.Bindcn, Config.Ldap.Bindpass)
+	}
 
 	if err != nil {
 		openldapUp.Set(0)
-		log.Println(err)
+		log.Fatal(err)
 	} else {
 		defer l.Close()
 
 		searchRequest := ldap.NewSearchRequest(
-			baseDN, // The base dn to search
+			Config.Ldap.Basedn, // The base dn to search
 			ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
 			"(objectClass=*)",      // The filter to apply
 			[]string{"contextCSN"}, // A list attributes to retrieve
@@ -79,7 +113,7 @@ func csnWorker(ldapHost, baseDN string) {
 			}
 		}
 		searchRequest = ldap.NewSearchRequest(
-			baseDN, // The base dn to search
+			Config.Ldap.Basedn, // The base dn to search
 			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 			"(objectClass=*)", // The filter to apply
 			[]string{"dn"},    // A list attributes to retrieve
@@ -98,9 +132,9 @@ func csnWorker(ldapHost, baseDN string) {
 	}
 }
 
-func ldapWorker(ldapHost, baseDN string) {
+func ldapWorker() {
 	for {
-		csnWorker(ldapHost, baseDN)
+		csnWorker()
 		time.Sleep(60 * time.Second)
 	}
 }
@@ -116,12 +150,17 @@ func main() {
 	var (
 		addr        = flag.String("telemetry.addr", ":9328", "host:port for syncrepl exporter")
 		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
-		ldapHost    = flag.String("ldap.host", "localhost:636", "hostname:port of the ldap server")
-		baseDN      = flag.String("base.dn", "", "'dc=example,dc=org' the base DN of the directory")
+		configFile  = flag.String("config.file", "config.yaml", "bind cn and password")
 	)
+
 	flag.Parse()
-	log.Printf(*addr, *metricsPath, *baseDN, *ldapHost)
-	go ldapWorker(*ldapHost, *baseDN)
+	log.Printf(*addr, *metricsPath, *configFile)
+
+	configor.Load(&Config, *configFile)
+
+	log.Printf("config: %#v", Config)
+
+	go ldapWorker()
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

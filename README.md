@@ -3,10 +3,8 @@ Prometheus exporter for syncrepl stats
 
 ```
 Usage of syncrepl_exporter:
-  -base.dn string
-    	'dc=example,dc=org' the base DN of the directory
-  -ldap.host string
-    	hostname:port of the ldap server (default "localhost:636")
+  -config.file string
+     bind cn and password (default "config.yaml")
   -telemetry.addr string
     	host:port for syncrepl exporter (default ":9328")
   -telemetry.path string
