@@ -36,6 +36,7 @@ var (
 		})
 )
 
+// Config stores the exporter configuration.
 var Config = struct {
 	Ldap struct {
 		Host     string `default:"localhost"`
@@ -151,12 +152,17 @@ func main() {
 		addr        = flag.String("telemetry.addr", ":9328", "host:port for syncrepl exporter")
 		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
 		configFile  = flag.String("config.file", "config.yaml", "bind cn and password")
+		num         int
+		err         error
 	)
 
 	flag.Parse()
 	log.Printf(*addr, *metricsPath, *configFile)
 
-	configor.Load(&Config, *configFile)
+	err = configor.Load(&Config, *configFile)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("config: %#v", Config)
 
@@ -164,13 +170,16 @@ func main() {
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
-			<head><title>OpenLDAP Exporter</title></head>
+		num, err = w.Write([]byte(`<html>
+			<head><title>OpenLDAP Sync Replication Exporter</title></head>
 			<body>
-			<h1>OpenLDAP Exporter</h1>
-			<p><a href='` + *metricsPath + `'>Metrics</a></p>
+			<h1>OpenLDAP Sync Replication Exporter</h1>
+			<p><a href="` + *metricsPath + `">Metrics</a></p>
 			</body>
 			</html>`))
+		if err != nil {
+			log.Fatal(num, err)
+		}
 	})
 	log.Printf("Starting OpenLDAP exporter on %q", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
