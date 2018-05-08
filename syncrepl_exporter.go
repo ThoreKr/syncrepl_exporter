@@ -68,7 +68,7 @@ func csnWorker() {
 
 	if Config.Ldap.StartTLS {
 		// Connect to host
-		l, err = ldap.Dial("tcp", Config.Ldap.Host + ":" + Config.Ldap.Port)
+		l, err = ldap.Dial("tcp", Config.Ldap.Host+":"+Config.Ldap.Port)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -77,7 +77,7 @@ func csnWorker() {
 		// Reconnect with TLS
 		err = l.StartTLS(conf)
 	} else {
-		l, err = ldap.DialTLS("tcp", Config.Ldap.Host + ":" + Config.Ldap.Port, conf)
+		l, err = ldap.DialTLS("tcp", Config.Ldap.Host+":"+Config.Ldap.Port, conf)
 	}
 
 	// Bind
