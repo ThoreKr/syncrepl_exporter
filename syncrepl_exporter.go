@@ -2,15 +2,17 @@ package main
 
 import (
 	"crypto/tls"
-	"flag"
-	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"strings"
 	"time"
 
 	"github.com/jinzhu/configor"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/log"
+	"github.com/prometheus/common/version"
+	"gopkg.in/alecthomas/kingpin.v2"
 	"gopkg.in/ldap.v2"
 )
 
@@ -36,6 +38,7 @@ var (
 		})
 )
 
+// Config stores the exporter configuration.
 var Config = struct {
 	Ldap struct {
 		Host     string `default:"localhost"`
@@ -68,7 +71,7 @@ func csnWorker() {
 
 	if Config.Ldap.StartTLS {
 		// Connect to host
-		l, err = ldap.Dial("tcp", Config.Ldap.Host + ":" + Config.Ldap.Port)
+		l, err = ldap.Dial("tcp", Config.Ldap.Host+":"+Config.Ldap.Port)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -77,7 +80,7 @@ func csnWorker() {
 		// Reconnect with TLS
 		err = l.StartTLS(conf)
 	} else {
-		l, err = ldap.DialTLS("tcp", Config.Ldap.Host + ":" + Config.Ldap.Port, conf)
+		l, err = ldap.DialTLS("tcp", Config.Ldap.Host+":"+Config.Ldap.Port, conf)
 	}
 
 	// Bind
@@ -102,7 +105,7 @@ func csnWorker() {
 		sr, err := l.Search(searchRequest)
 		if err != nil {
 			openldapUp.Set(0)
-			log.Println(err)
+			log.Errorln(err)
 		} else {
 			openldapUp.Set(1)
 			for _, entry := range sr.Entries {
@@ -123,7 +126,7 @@ func csnWorker() {
 		sr, err = l.Search(searchRequest)
 		if err != nil {
 			openldapUp.Set(0)
-			log.Println(err)
+			log.Errorln(err)
 		} else {
 			openldapUp.Set(1)
 			numEntries.Set(float64(len(sr.Entries)))
@@ -148,30 +151,47 @@ func init() {
 
 func main() {
 	var (
-		addr        = flag.String("telemetry.addr", ":9328", "host:port for syncrepl exporter")
-		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
-		configFile  = flag.String("config.file", "config.yaml", "bind cn and password")
+		listenAddress = kingpin.Flag("web.listen-address", "Address on which to expose metrics and web interface.").Default(":9328").String()
+		metricsPath   = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").String()
+		configFile    = kingpin.Flag("path.config", "Configuration YAML file path.").Default("config.yaml").String()
+		num           int
+		err           error
 	)
 
-	flag.Parse()
-	log.Printf(*addr, *metricsPath, *configFile)
+	log.AddFlags(kingpin.CommandLine)
+	kingpin.Version(version.Print("syncrepl_exporter"))
+	kingpin.HelpFlag.Short('h')
+	kingpin.Parse()
 
-	configor.Load(&Config, *configFile)
+	log.Infoln("Starting OpenLDAP Sync Replication Exporter", version.Info())
+	log.Infoln("Build context", version.BuildContext())
 
-	log.Printf("config: %#v", Config)
+	err = configor.Load(&Config, *configFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Infof("Configuration:\n %+v", Config)
 
 	go ldapWorker()
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
-			<head><title>OpenLDAP Exporter</title></head>
+		num, err = w.Write([]byte(`<html>
+			<head><title>OpenLDAP Sync Replication Exporter</title></head>
 			<body>
-			<h1>OpenLDAP Exporter</h1>
-			<p><a href='` + *metricsPath + `'>Metrics</a></p>
+			<h1>OpenLDAP Sync Replication Exporter</h1>
+			<p><a href="` + *metricsPath + `">Metrics</a></p>
 			</body>
 			</html>`))
+		if err != nil {
+			log.Fatal(num, err)
+		}
 	})
-	log.Printf("Starting OpenLDAP exporter on %q", *addr)
-	log.Fatal(http.ListenAndServe(*addr, nil))
+
+	log.Infoln("Listening on", *listenAddress)
+	err = http.ListenAndServe(*listenAddress, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
