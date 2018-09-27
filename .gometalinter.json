@@ -2,6 +2,7 @@
   "Disable": ["gas"],
   "Deadline": "6m",
   "EnableGC": true,
+  "Exclude": ["TLS InsecureSkipVerify set true."],
   "Sort": ["linter", "severity", "path", "line"],
   "Vendor": true
 }

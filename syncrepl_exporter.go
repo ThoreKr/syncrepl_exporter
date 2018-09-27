@@ -55,7 +55,10 @@ func ymdToUnix(contextCSN string) (timestamp int64, label string) {
 	// This is a totally crude approach to set a well known base time to parse another date later
 	format := "20060102150405"
 	ymd := strings.Split(contextCSN, ".")[0]
-	time, _ := time.Parse(format, ymd)
+	time, err := time.Parse(format, ymd)
+	if err != nil {
+		log.Error(err)
+	}
 	label = strings.Split(contextCSN, "#")[2]
 	return time.Unix(), label
 }
